@@ -4,8 +4,31 @@
 Define abstract types with fields to be inherited by concrete subtypes.
 """
 module InheritableFields
-export @inheritable, @inheriting, validate_args
+export @abstract, @immutable, @mutable
 #export FieldDecl, map_symbols, type_decls, type_field_decls
+
+
+#=
+Overview:
+
+@abstract defines an abstract type and stores the associated fields.
+@(im)mutable defines a (im)mutable struct type with the fields of all its abstract ancestors.
+
+This means if we want a hierarchy A :> B :> C and and wont concrete instances of A,B,C,
+we have to use @(im)mutable to define types ConcreteA <: A, ConcreteB <: B, and ConcreteC <: C.
+
+This is unavoidable in Julia since concrete types (i.e. types with fields) cannot be subtyped.
+=#
+
+#=
+When an @abstract type is declared:
+- A corresponding abstract type is defined
+- The details of the type declaration are "stored" in a global way.
+	This is done by defining a method of the type_declaration function that returns those details. The reason we do it this way instead of using a Dict, is that the type name is 
+	(Why is this done instead of using a Dict?)
+
+=#
+
 
 # This seems to really work!!
 # TODO: Tidy up.  Maybe move some stuff to TypeTools.
@@ -13,8 +36,8 @@ export @inheritable, @inheriting, validate_args
 # TODO: Handle Vararg parametric types
 # TODO: Because type declarations and field declarations are stored as expressions,
 #       namespaces are not utilized.  Thmis means same-named types in different
-#       namespaces are not disambiguated.  Also, if an @inheriting type inherits an
-#       @inheritable type definied in a different namespace, the inherited fields may
+#       namespaces are not disambiguated.  Also, if an @(im)mutable type inherits an
+#       @abstract type definied in a different namespace, the inherited fields may
 #       involve type names that are not known in the inheriting namespace.
 #
 #       Possible approaches:
@@ -33,8 +56,8 @@ export @inheritable, @inheriting, validate_args
 #               Also, this will yield an actual type, not an expression ...
 #
 #          The first approach is in progress. So far, so good.
-#          TODO: Move name qualification from @inheriting to process_typedef?
-#                Maybe not, because then it would hhappen for @inheriting also ...
+#          TODO: Move name qualification from @(im)mutable to process_typedef?
+#                Maybe not, because then it would hhappen for @(im)mutable also ...
 #          TODO: Qualify supertype name also.  But this makes it hard to use as a key.
 #                Maybe use actual types for keys, but store parameter expressions
 #                   separately.
@@ -43,7 +66,7 @@ export @inheritable, @inheriting, validate_args
 #       This would also make it easier to look up types in namespaces, since we could
 #       dispatch on the actual type instead of its name.  But then we should store
 #       the formal parameter expressions separately from the types.
-# TODO: Allow deriving from intermediary non-@inheritable types.  This will require extracting
+# TODO: Allow deriving from intermediary non-@abstract types.  This will require extracting
 #       the formal parameters from the type definition and mapping them, either directly or by
 #       turning them into expressions first.
 
@@ -58,7 +81,7 @@ export @inheritable, @inheriting, validate_args
 # 	end
 #
 #
-# 	@inheritable A{T} begin
+# 	@abstract A{T} begin
 # 			s::S{T}
 # 		end
 # end
@@ -66,7 +89,7 @@ export @inheritable, @inheriting, validate_args
 # (in Main)
 # using InheritableFields
 # using Main.MyModule
-# @inheriting struct B{X} <: A{X} end
+# @immutable struct B{X} <: A{X} end
 #
 # Since S is not exported to A, the field declaration s::S{T} from will not work in B.
 # Thus s::S{T} needs to become s::MyModule.S{T}, which in B becomes s::MyModule.S{X}.
@@ -82,11 +105,13 @@ using OrderedCollections
 
 import TypeTools.map_symbols
 
-# The declaration of each inheritable type are stored in a global registry.
+# The declaration of each @abstract type are "stored" in a global registry.
 # The declaration consists of:
 #   - The type's name and formal parameters
 #   - Its supertype's name and formal parameters
 #   - The field names, their types, and optional default values
+# These are not stored in a data structure; rather, we define a method of type_declaration()
+# that returns this data. (Why do it this way?) 
 # All these are stored as expressions. When a concrete subtype is defined, these
 # declarations are retrieved, translated into the formal parameters of the concrete type,
 # and incorporated into the concrete type's definition.
@@ -98,13 +123,13 @@ const FieldDecl = NamedTuple{(:name, :type, :default), Tuple{Symbol, Expression,
 const TypeDecl = Tuple{Expression, Expression, OrderedDict{Symbol, FieldDecl}}
 
 # The global "registry" is a function that returns the type delcaration (::TypeDecl) of an
-# @inheritable type (or returns nothing).
+# @abstract type (or returns nothing).
 # TODO:  Currently accepts a symbol?  Change to accepting a type?
 type_declaration(::Val{<:Any}) = nothing
 
 
-# Argument validator for @inheritable types
-function validate_args end
+# Argument validator for @abstract types
+function validate end
 
 # This stores the signatures of the declared types and their supertypes
 #const type_decls = Dict{Symbol, Tuple{Expression, Expression}}()
@@ -114,25 +139,25 @@ function validate_args end
 
 
 """
-    @inheritable ‹type_decl› begin [fields] [validator] end
+    @abstract ‹type_decl› begin [fields] [validator] end
 
 Define an abstract type with associated fields that are incorporated into concrete subtypes.
 
 Each field declaration has the form `name[::Type] [ = defaultvalue]`.
 
 The type declaration may also include a validator function to ensure that concrete
-subtypes are constructed with valid field values. The validator must be named `validate_args`
+subtypes are constructed with valid field values. The validator must be named `validate`
 and must have the same parameterization and signature that a default constructor would
 have. The validator should either return valid arguments for a default constructor or
 throw an exception.
 
 # Example
 ```
-@inheritable A{T<:Number}
+@abstract A{T<:Number}
 begin
     x::T = zero(T)
     y
-    function validate_args(x, y)
+    function validate(x, y)
         x < zero(T) || error("x must be non-negative")
         return (x,y)
     end
@@ -140,16 +165,16 @@ end
 ```
 See also:  [`@inherit`](@ref)
 """
-macro inheritable(type_decl, body = :(begin end) )
+macro abstract(type_decl, body = :(begin end) )
     (type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators) = process_typedef(type_decl, body)
 
     caller_mod = __module__
-    #@info "Defining inheritable type $type_sig <: $super_sig in module $caller_mod"
+    #@info "Defining abstract type $type_sig <: $super_sig in module $caller_mod"
 
     # create a default "validator" if none was provided
     if isempty(validators)
         field_names = keys(field_decls)
-        push!(validators, :( InheritableFields.validate_args(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
+        push!(validators, :( InheritableFields.validate(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
     end
 
     caller_name = nameof(caller_mod)
@@ -174,7 +199,7 @@ macro inheritable(type_decl, body = :(begin end) )
 #                rethrow(e)
 #            end
         end
-#    println( MacroTools.prewalk(rmlines, esc(expr)))
+   #  println( MacroTools.prewalk(rmlines, esc(expr)))
     return esc(expr)
 #    return MacroTools.prewalk(rmlines, esc(expr))
 end
@@ -182,20 +207,22 @@ end
 
 
 """
-    @inheriting [mutable] struct ‹type_decl› [fields] [validator] end
+    @mutable ‹type_decl› begin [fields] [validator] end
+    @immutable ‹type_decl› begin [fields] [validator] end
 
-Define a concrete type that inherits fields from supertypes declared with `@inheritable`.
-The fields of all `inheritable` supertypes are automatically incorporated into the
+Define a concrete struct type that inherits fields from supertypes declared with `@abstract`.
+The fields of all @abstract supertypes are automatically incorporated into the
 definition of the concrete type, in order of increasingly specialized supertypes.
 # EXample
 ```
-@inheriting A{T}
+@abstract A{T}
 begin
     x::T = zero(T)
     y
 end
 
-@inheriting struct B{S} <: A{S}
+@immutable B{S} <: A{S}
+begin
     z::String = "hello"
 end
 ```
@@ -215,25 +242,18 @@ B{S}(obj::B{S}; x::S = obj.x, y::Any = obj.y, z::String = obj.z) where {S} = B{S
 ```
 (The second member of each pair is not created if B has no type parameters.)
 
-See also: [`@inheritable`](@ref)
+See also: [`@abstract`](@ref)
 """
-macro inheriting(typedef)
-    return esc(inheriting(typedef))
+macro immutable(type_decl, body = :(begin end) )
+    return esc(define_concrete_type(type_decl, body; ismutable = false))
+end
+
+macro mutable(type_decl, body = :(begin end) )
+	return esc(define_concrete_type(type_decl, body; ismutable = true))
 end
 
 # Function version. More convenient for calling from other macros
-function inheriting(typedef)
-    # parse the signature
-    typedef.head == :struct || error("@inherit must be followed by a structure definition")
-    ismutable = typedef.args[1]
-
-    type_decl = typedef.args[2]
-    body = typedef.args[3]
-    inheriting(type_decl, body, ismutable = ismutable)
-end
-
-
-function inheriting(type_decl, body; ismutable)
+function define_concrete_type(type_decl, body; ismutable)
     (type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators) = process_typedef(type_decl, body)
 
     # @info "Defining inherited type $type_sig <: $super_sig"
@@ -301,8 +321,8 @@ function inheriting(type_decl, body; ismutable)
             prepend!(struct_field_decls, _struct_field_decls)
             prepend!(kw_args1, _kw_args1)
             prepend!(kw_args2, _kw_args2)
-            pushfirst!(constr_args, :( InheritableFields.validate_args($ancestor_unbound_sig, $(keys(field_decls)...) )... ) )
-            # When we handle non-@inheritable ancestors, this should go outside the if-else-end
+            pushfirst!(constr_args, :( InheritableFields.validate($ancestor_unbound_sig, $(keys(field_decls)...) )... ) )
+            # When we handle non-@abstract ancestors, this should go outside the if-else-end
             next_sig = map_symbols(next_sig, formal_params, ancestor_params)
             (ancestor_name, ancestor_params, _) = parse_typesig(next_sig)
             if isempty(ancestor_params)
@@ -311,7 +331,7 @@ function inheriting(type_decl, body; ismutable)
                 ancestor_unbound_sig = :( $(ancestor_name){$(ancestor_params...)} )
             end
         else
-            @warn "In defining $type_name, $ancestor_name is not an `@inheritable` type. No more ancestors will be `@inherit`ed."
+            @warn "In defining $type_name, $ancestor_name is not an `@abstract` type. No more ancestors will be `@inherit`ed."
             break
         end
     end
@@ -383,7 +403,7 @@ function process_typedef(type_decl::Expression, body::Expression)
 
         if isfunction
             # Check whether we have a well-formed validator
-            (func == :validate_args) || error("The only function that may be defined in an @inheritable type must be named 'validate_args'.")
+            (func == :validate) || error("The only function that may be defined in an @abstract type must be named 'validate'.")
             (params == nothing) || @warn "Ignoring the `where {...}` clause of the validator; the necessary `where` cluase is automatically derived from the type declaration."
 
             # We appear to have a validator.  Make sure it's the only one
@@ -391,8 +411,8 @@ function process_typedef(type_decl::Expression, body::Expression)
 
             # Modify the validator:  Qualify the name and add the type as the first argument
             decl = postwalk(decl) do ex
-                    if (ex isa Expr) && (ex.head == :call) && (ex.args[1] == :validate_args)
-                        ex.args = [:(InheritableFields.validate_args); :(::Type{$unbound_sig}); ex.args[2:end]]
+                    if (ex isa Expr) && (ex.head == :call) && (ex.args[1] == :validate)
+                        ex.args = [:(InheritableFields.validate); :(::Type{$unbound_sig}); ex.args[2:end]]
                     end
                     return ex
                 end
@@ -411,7 +431,7 @@ function process_typedef(type_decl::Expression, body::Expression)
     # create a default "validator" if none was provided
     if isempty(validators)
         field_names = keys(field_decls)
-        push!(validators, :( InheritableFields.validate_args(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
+        push!(validators, :( InheritableFields.validate(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
     end
 
     return (type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators)
@@ -504,7 +524,7 @@ end
 # Create the code to be evaluated
 # - Declare the abstract type
 # - Define the validators
-# - Record the new type in the table of inheritable types
+# - Record the new type in the table of @inheritable types
 # - Record its field declarations
 # We do these last two steps in the evaluated expression rather than within this macro,
 # in case something fails. and their supertypes
