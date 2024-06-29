@@ -189,7 +189,7 @@ The fields of all `inheritable` supertypes are automatically incorporated into t
 definition of the concrete type, in order of increasingly specialized supertypes.
 # EXample
 ```
-@inheritable A{T}
+@inheriting A{T}
 begin
     x::T = zero(T)
     y
