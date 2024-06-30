@@ -1,7 +1,7 @@
 name = "InheritableFields"
 uuid = "284fb2d5-051f-46d8-adb4-4fe3216759af"
 authors = ["Ryan Bennink <benninkrs@ornl.gov>"]
-version = "0.1.2"
+version = "0.2"
 
 [deps]
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"

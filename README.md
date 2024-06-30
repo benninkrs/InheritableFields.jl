@@ -1,10 +1,11 @@
 # InheritableFields.jl
 
-Provides a convenient, robust, and performant way to define abstract types with inheritable fields.
+[InheritableFields.jl](https://github.com/benninkrs/InheritableFields.jl) provides a convenient, robust way to define abstract types with fields that are ultimately inherited by concrete subtypes.
+(Similar functionality is offered by many other packages, including [Classes.jl](https://github.com/rjplevin/Classes.jl), [ConcreteAbstractions.jl](https://github.com/tbreloff/ConcreteAbstractions.jl),
+[OOPMacro.jl](https://github.com/ipod825/OOPMacro.jl), [ObjectOriented.jl](https://github.com/Suzhou-Tongyuan/ObjectOriented.jl), and [Inherit.jl](https://github.com/mind6/Inherit.jl); 
+see also [Mixers.jl](https://github.com/rafaqz/Mixers.jl) and [ReusePatterns.jl](https://github.com/gcalderone/ReusePatterns.jl).)
 
-This functionality is similar to that of several other packages: [Classes.jl](https://github.com/rjplevin/Classes.jl), [ConcreteAbstractions.jl](https://github.com/tbreloff/ConcreteAbstractions.jl),
-[OOPMacro.jl](https://github.com/ipod825/OOPMacro.jl), and [ObjectOriented.jl](https://github.com/Suzhou-Tongyuan/ObjectOriented.jl), and [Inherit.jl](https://github.com/mind6/Inherit.jl).
-See also [Mixers.jl](https://github.com/rafaqz/Mixers.jl) and [ReusePatterns.jl](https://github.com/gcalderone/ReusePatterns.jl).
+This package does not aim to broadly recreate an object-oriented programming style in Julia, nor does it aim to provide a way to define and/or enforce interfaces.
 
 ## Basic Usage
 
@@ -26,10 +27,14 @@ Use `@mutable` or `@immutable` to create mutable or immutable `struct` type that
 @immutable C{T} <: B{T} begin
 	b::Bool
 end
-
-c = C("hello", 1.2, -6, true)
 ```
-`c` is of type `C{Float64}` with fields `s = "hello"`, `x = 1.2`, `i = -6`, `b = true` in that order.  The general principle is that the fields of the concrete type and all `@abstract` supertypes are concatenated in order from the most abstract supertype to the least abstract.  For this reason, the fieldnames of a subtype must be distinct from those of its aancestor types.
+In this example, instances of type `C{T}` will have fields `s::String`, `x::T`, `i::Int`, and `b::bool`, in that order.
+
+To achieve an effective hierarchy of concrete types, say `Person >: Employee :> Salaried`, first create a hierarchy of `@abstract` types, e.g. `AbstractPerson :> AbstractEmployee >: AbstractSalaried`.  Then, define methods that dispatch on these abstract types.  Finally, define a concrete type for each abstract type in the hierarachy (e.g. `@mutable Person <: AbstractPerson begin end`).
+
+<!-- c = C("hello", 1.2, -6, true)
+```
+`c` is of type `C{Float64}` with fields `s = "hello"`, `x = 1.2`, `i = -6`, `b = true` in that order.  The general principle is that the fields of the concrete type and all `@abstract` supertypes are concatenated in order from the most abstract supertype to the least abstract.  For this reason, the fieldnames of a subtype must be distinct from those of its aancestor types. -->
 
 
 ## Advanced Usage
@@ -40,7 +45,7 @@ Besides the default constructor, a keyword-based constructor is defined for each
 ```
 c = C(; i = -6, x = 1.2, b = true, s = "hello")  # == C{Float64}("goodbye", 1.2, -6, true)
 ```
-Besides providing increased readibility and robustness to field order, the keyword constructor allows the use of optional  _default values_ included in the field declarations:
+Besides providing increased readibility and robustness to field order, the keyword constructor allows the use of default values. Any field declaration may optionally include a default value by expressing it as an assignment:
 ```
 @abstract A{T<:Number}
 begin
@@ -48,20 +53,19 @@ begin
 	x::T
 end
 ```
-The default value of a field is used when the keyword constructor is invoked without a value for the field's name:
+The default value of a field is used when the keyword constructor is invoked without specifying a value for that field:
 ```
 c = C(; i = -6; b = true; x = 1.2)  # == C{Float64}("goodbye", 1.2, -6, true)
 ```
 
 ### Validation of Construction Values
 
-Within the body of an `@abstract`, `@mutable`, or `@immutable` type definition, one can implement the function `validate` to validate construction values for the fields introduced by that type. For example, suppose type `A` requires `x` to be nonnegative.  This can be enforced as follows:
+Within the body of an `@abstract`, `@mutable`, or `@immutable` type definition, one can implement a special method to validate construction values for the fields introduced by that type. For example, suppose type `A` requires `x` to be nonnegative.  This can be enforced as follows:
 ```
 @abstract A{T<:Number} begin
 	 s::String = "goodbye"
     x::T
     function validate(s, x)
-	 	println("s = $s, x = $x")
         x >= zero(T) || error("x must be non-negative")
         return (s, x)
     end
@@ -72,26 +76,32 @@ end
 c = C(; i = -6; b = true; x = -1.2)
 ERROR: x must be non-negative
 ```
-The `validate` method should simply return valid construction values, and throw a helpful error on invalid construction values.  When a `@mutable` or `@mmutable` type is constructed, the `validate` methods of all ancestor types are called in order from most abstract to least abstract.
+The constructors that are automatically created for a `@mutable` or `@mmutable` type pass the input arguments associated with each type in the hierarchy to the provided validation function.
+
+A validation method should be defined within the type body, be named `validate`, and have the same parameterization and signature that a default constructor would.  It should either return valid arguments for a default constructor or throw an exception.  
 
 
-## Robustness
+## Hygiene
 
-Type parameters are carefully propagated from subtypes to supertypes. For example, if `C` were defined as
+Type parameters propagate from subtypes to supertypes as one would expect, regardless of their formal names. Similarly, type definitions will be evaluated correctly even if defined in different modules.
+
+<!--
+For example, if `C` were defined as
 ```
-@immutable C{U,S,V} <: B{S}
+@immutable C{U,S} <: B{S}
 begin
-	b::Bool
+	b::U
 end
 ```
-then in an instance of type `C{Any, Complex, Char}`, the field `x` would have type `Complex` because the `S` in `C{U,S,V}` is mapped to `B{S}`, which is mapped to `A{S}`, which is mapped to `x::S`.
+then in `C("hi", Complex(0.1, -2.3), 5, true)`, the field `x::T` from `A{T}` would be `x::Complex{Float64}` because the `S` in `C{U,S}` is inferred to be Complex{Float64}, which is then mapped to `B{S}`, which is mapped to `A{S}`, which is mapped to `x::S`.
 
+Similarly, type definitions will be evaluated correctly even if defined in different modules.  This is because all non-parameter symbols appearing in field declarations are implicitly qualified by the module in which they are originally defined.
 
 ## Limitations
 
 `validate` methods should only be defined within the bodies of `@abstract`, `@mutable`, or `@immutable` type definitions.
+-->
 
-TType definitions are stored as expressions. Currently, if those expressions are evaluated in a different scope, symbols appearing within them may not be properyl resolved.  This is a work in progress.
 
 
 ## Implementation

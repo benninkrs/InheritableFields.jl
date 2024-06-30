@@ -72,25 +72,27 @@ When an @abstract type is declared:
 
 
 # Here's an example of the namespace issue.
-# module MyModule
-# using InheritableFields
-# export A
-#
-# 	struct S{T}
-# 		x::Vector{T}
-# 	end
-#
-#
-# 	@abstract A{T} begin
-# 			s::S{T}
-# 		end
-# end
-#
-# (in Main)
-# using InheritableFields
-# using Main.MyModule
-# @immutable struct B{X} <: A{X} end
-#
+#=
+module MyModule
+using InheritableFields
+export A
+
+	struct S{T}
+		x::Vector{T}
+	end
+
+
+	@abstract A{T} begin
+		s::S{T}
+	end
+end
+
+#(in Main)
+using InheritableFields
+using Main.MyModule
+@immutable B{X} <: A{X} begin end
+
+=#
 # Since S is not exported to A, the field declaration s::S{T} from will not work in B.
 # Thus s::S{T} needs to become s::MyModule.S{T}, which in B becomes s::MyModule.S{X}.
 # Note that MyModule is necessarily a sufficient qualifier, since if MyModule were not
@@ -120,12 +122,12 @@ import TypeTools.map_symbols
 const Expression = Any
 const FieldDecl = NamedTuple{(:name, :type, :default), Tuple{Symbol, Expression, Any}}
 # (type_signature, supertype_signature, field_declarations)
-const TypeDecl = Tuple{Expression, Expression, OrderedDict{Symbol, FieldDecl}}
+const TypeDecl = Tuple{Module, Expression, Expression, OrderedDict{Symbol, FieldDecl}}
 
 # The global "registry" is a function that returns the type delcaration (::TypeDecl) of an
 # @abstract type (or returns nothing).
 # TODO:  Currently accepts a symbol?  Change to accepting a type?
-type_declaration(::Val{<:Any}) = nothing
+type_declaration(::Type) = nothing
 
 
 # Argument validator for @abstract types
@@ -141,7 +143,7 @@ function validate end
 """
     @abstract ‹type_decl› begin [fields] [validator] end
 
-Define an abstract type with associated fields that are incorporated into concrete subtypes.
+Define an abstract type with fields to be incorporated into concrete subtypes.
 
 Each field declaration has the form `name[::Type] [ = defaultvalue]`.
 
@@ -153,22 +155,23 @@ throw an exception.
 
 # Example
 ```
-@abstract A{T<:Number}
-begin
-    x::T = zero(T)
-    y
-    function validate(x, y)
-        x < zero(T) || error("x must be non-negative")
-        return (x,y)
-    end
+@abstract A{T<:Number} begin
+	s::String
+	x::T = zero(T)
+	function validate(s, x)
+		x >= zero(T) || error("x must be non-negative")
+   	return (s, x)
+   end
 end
 ```
-See also:  [`@inherit`](@ref)
+See also: [`@mutable`](@ref), [`@immutable`](@ref)
 """
 macro abstract(type_decl, body = :(begin end) )
     (type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators) = process_typedef(type_decl, body)
 
-    caller_mod = __module__
+    caller = __module__
+	#  println("calling module is $caller_mod")
+
     #@info "Defining abstract type $type_sig <: $super_sig in module $caller_mod"
 
     # create a default "validator" if none was provided
@@ -177,23 +180,24 @@ macro abstract(type_decl, body = :(begin end) )
         push!(validators, :( InheritableFields.validate(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
     end
 
-    caller_name = nameof(caller_mod)
-    for i in eachindex(field_decls)
-        fdecl = field_decls[i]
-        #print("Qualifying $(fdecl.type) as ")
-        new_type = qualify_symbols(fdecl.type, type_params, caller_name)
-        new_default = qualify_symbols(fdecl.default, type_params, caller_name)
-        fdecl = (name = fdecl.name, type = new_type, default = new_default)
-        #println(fdecl.type)
-        field_decls[i] = fdecl
-    end
-    newtype_decl = TypeDecl((unbound_sig, super_sig, field_decls))
+	 # Is this sufficient?  Probably not
+    caller_name = nameof(caller)
+   #  for i in eachindex(field_decls)
+   #      fdecl = field_decls[i]
+   #      #print("Qualifying $(fdecl.type) as ")
+   #      new_type = qualify_symbols(fdecl.type, type_params, caller_name)
+   #      new_default = qualify_symbols(fdecl.default, type_params, caller_name)
+   #      fdecl = (name = fdecl.name, type = new_type, default = new_default)
+   #      #println(fdecl.type)
+   #      field_decls[i] = fdecl
+   #  end
+    newtype_decl = TypeDecl((caller, unbound_sig, super_sig, field_decls))
 
     expr = quote
 #                try
                    Base.@__doc__ abstract type $type_sig <: $super_sig end
                    $(validators...)
-                   InheritableFields.type_declaration(::Val{$(QuoteNode(type_name))}) = $newtype_decl
+                   InheritableFields.type_declaration(::Type{$type_name}) = $newtype_decl
 #            catch e
 #                delete!(InheritableFields.type_declarations, $(QuoteNode(type_name)));
 #                rethrow(e)
@@ -215,29 +219,28 @@ The fields of all @abstract supertypes are automatically incorporated into the
 definition of the concrete type, in order of increasingly specialized supertypes.
 # EXample
 ```
-@abstract A{T}
-begin
-    x::T = zero(T)
-    y
+@abstract A{T<:Number} begin
+	s::String
+	x::T = zero(T)
 end
 
-@immutable B{S} <: A{S}
-begin
-    z::String = "hello"
+@immutable B{S} <: A{S} begin
+    i::Int
+	 y
 end
 ```
-Then `B` has fields `x::S, y::Any, z::String`. (Note that the type parameters of `B` are
-propagated to `A`.)  An instane of `B` can be created by the default constructor,
-`B{Float64}(1.2, -5, "bye")` are one of several convenience constructors that are
+Then `B` has fields `s::String, x::S, i::Int, z::Any`. (Note that the type parameters of `B` are
+propagated to `A`.)  An instance of `B` can be created by the default constructor, 
+`B{Float64}("hello", 1.2, -5, true), or one of several convenience constructors that are
 automatically created:
 ```
 # Construct with keyword arguments
-B(; x::S = zero(S), y, z::String = "hello") where {S} = B{S}(x, y, z)
-B{S}(; x::S = zero(S), y::Any, z::String = "hello") where {S} = B{S}(x, y, z)
+B(; s::String, x::S = zero(S), i::Int, y::Any) where {S} = B{S}(s, x, i, y)
+B{S}(; s::String, x::S = zero(S), i::Int, y::Any) where {S} = B{S}(s, x, i, y)
 
 # Construct from another instance, modifying selected fields with keyword arguments
-B(obj::B; x::S = obj.x, y::Any = obj.y, z::String = obj.z) where {S} = B{S}(x, y, z)
-B{S}(obj::B{S}; x::S = obj.x, y::Any = obj.y, z::String = obj.z) where {S} = B{S}(x, y, z)
+B(obj::B; s::String = obj.s, x::S = obj.x, i::Int = obj.i, y::Any = obj.y) where {S} = B{S}(s, x, i, i)
+B{S}(obj::B{S}; x::S = obj.x, y::Any = obj.y, z::String = obj.z) where {S} = B{S}(s, x, i, y)
 
 ```
 (The second member of each pair is not created if B has no type parameters.)
@@ -245,20 +248,22 @@ B{S}(obj::B{S}; x::S = obj.x, y::Any = obj.y, z::String = obj.z) where {S} = B{S
 See also: [`@abstract`](@ref)
 """
 macro immutable(type_decl, body = :(begin end) )
-    return esc(define_concrete_type(type_decl, body; ismutable = false))
+	caller = __module__
+    return esc(define_concrete_type(caller, type_decl, body; ismutable = false))
 end
 
 macro mutable(type_decl, body = :(begin end) )
-	return esc(define_concrete_type(type_decl, body; ismutable = true))
+	caller = __module__
+	return esc(define_concrete_type(caller, type_decl, body; ismutable = true))
 end
 
 # Function version. More convenient for calling from other macros
-function define_concrete_type(type_decl, body; ismutable)
+function define_concrete_type(caller, type_decl, body; ismutable)
     (type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators) = process_typedef(type_decl, body)
 
     # @info "Defining inherited type $type_sig <: $super_sig"
 
-    newtype_decl =  TypeDecl((unbound_sig, super_sig, field_decls))
+    newtype_decl =  TypeDecl((caller, unbound_sig, super_sig, field_decls))
 
     # println("Adding declaration: ", type_declarations[type_name][1], " <: ", type_declarations[type_name][2])
 
@@ -272,69 +277,99 @@ function define_concrete_type(type_decl, body; ismutable)
     kw_args2 = Expression[]
     constr_args = Expression[]
 
+	 # ancestor will loop from the type being defined up through the chain of ancestors
     ancestor_name = type_name
     ancestor_params = type_params
     ancestor_unbound_sig = unbound_sig
     formal_sig = type_sig
     next_sig = super_sig
     formal_params::Vector{Symbol} = type_params
+	 context = caller
+	 println("calling module is $caller")
 
+	while ancestor_name != :Any
+      @info "  Retrieving fields of $ancestor_name{$(ancestor_params...)}"
 
-    while ancestor_name != :Any
-        # @info "  Retrieving fields of $ancestor_name{$(ancestor_params...)}"
+		_struct_field_decls = Expression[]
+		_kw_args1 = Expression[]
+		_kw_args2 = Expression[]
 
-        if ancestor_name == type_name || type_declaration(Val(ancestor_name)) != nothing
-            # (formal_sig, next_sig) = type_decls[ancestor_name]
-            # field_decls = type_field_decls[ancestor_name]
-            if ancestor_name != type_name
-                (formal_sig, next_sig, field_decls) = type_declaration(Val(ancestor_name))
-                (_, formal_params, _) = parse_typesig(formal_sig)
-            end
-            # println("processing ", ancestor_name)
-            # println("  ancestor_params = ", ancestor_params)
-            # println("  ancestor_unbound_sig = ", ancestor_unbound_sig)
-            # println("  formal_sig = ", formal_sig)
-            # println("  formal_params = ", formal_params)
-            # println("  next_sig = ", next_sig)
-            _struct_field_decls = Expression[]
-            _kw_args1 = Expression[]
-            _kw_args2 = Expression[]
-            if length(ancestor_params) != length(formal_params)
-                @info "type = $ancestor_name"
-                @info "ancestor_params = $ancestor_params"
-                @info "formal_params = $formal_params"
-                error("The declaration of $ancestor_name or one of its subtypes did not specify all required parameters")
-            end
-            # println("Processing type $ancestor_name with parameters {$(ancestor_params...)}, formal parameters {$(formal_params...)}")
-            for fdecl in values(field_decls)
-                # println("  Adding field ", fdecl.name)
-                # translate the field declaration to the ancestor's parameters
-                # print("inheriting field $fdecl as ")
-                fdecl = map_symbols(fdecl, formal_params, ancestor_params)
-                # @info "   Inheriting field $fdecl"
-                # add the declaration w/o the default value to the struct's declared fields
-                push!(_struct_field_decls, plain_field_decl(fdecl))
-                # add the full declaration to the list of arguments for the keyword validator
-                push!(_kw_args1, kw_field_decl(fdecl))
-                push!(_kw_args2, kw_field_decl_obj(fdecl))
-            end
-            prepend!(struct_field_decls, _struct_field_decls)
-            prepend!(kw_args1, _kw_args1)
-            prepend!(kw_args2, _kw_args2)
-            pushfirst!(constr_args, :( InheritableFields.validate($ancestor_unbound_sig, $(keys(field_decls)...) )... ) )
-            # When we handle non-@abstract ancestors, this should go outside the if-else-end
-            next_sig = map_symbols(next_sig, formal_params, ancestor_params)
-            (ancestor_name, ancestor_params, _) = parse_typesig(next_sig)
-            if isempty(ancestor_params)
-                ancestor_unbound_sig = ancestor_name
-            else
-                ancestor_unbound_sig = :( $(ancestor_name){$(ancestor_params...)} )
-            end
-        else
-            @warn "In defining $type_name, $ancestor_name is not an `@abstract` type. No more ancestors will be `@inherit`ed."
-            break
-        end
+		if ancestor_name != type_name
+			# This is a true ancestor.  Retrieve its fields and validators.
+			
+			# Obtain the ancestor type from the name
+			ancestor_type = Base.eval(context, ancestor_name)
+			# ancestor_type = context.eval(ancestor_name)
+
+			type_decl = type_declaration(ancestor_type)
+			if isnothing(type_decl)
+				@warn "In defining $type_name, $ancestor_name is not an `@abstract` type. No more ancestors will be inherited."
+				break
+			end
+
+			# Retrieve the field declarations
+			# (formal_sig, next_sig) = type_decls[ancestor_name]
+			# field_decls = type_field_decls[ancestor_name]
+			(context, formal_sig, next_sig, field_decls) = type_decl
+			(_, formal_params, _) = parse_typesig(formal_sig)
+
+			println("  ancestor_params = ", ancestor_params)
+			println("  ancestor_unbound_sig = ", ancestor_unbound_sig)
+			println("  formal_sig = ", formal_sig)
+			println("  formal_params = ", formal_params)
+			println("  next_sig = ", next_sig)
+
+			if length(ancestor_params) != length(formal_params)
+					@info "ancestor_params = $ancestor_params"
+					@info "formal_params = $formal_params"
+					error("The declaration of $ancestor_name did not specify all required parameters")
+			end
+		end
+
+		# Parse the field declarations
+		println("Processing type $ancestor_name with parameters {$(ancestor_params...)}, formal parameters {$(formal_params...)}")
+		for fdecl in values(field_decls)
+			# println("  Adding field ", fdecl.name)
+			# translate the field declaration to the ancestor's parameters
+			# print("inheriting field $fdecl as ")
+
+			# Map the formal parameters from subtype to supertype
+			fdecl = map_symbols(fdecl, formal_params, ancestor_params)
+
+			# Qualify all symbols (excluging type vars) by the Module where they were used
+			print("Qualifying $fdecl as ")
+			new_type = qualify_symbols(fdecl.type, type_params, context)
+			new_default = qualify_symbols(fdecl.default, type_params, context)
+			fdecl = FieldDecl((fdecl.name, new_type, new_default))
+			println(fdecl)
+
+			# @info "   Inheriting field $fdecl"
+			# add the declaration w/o the default value to the struct's declared fields
+			push!(_struct_field_decls, plain_field_decl(fdecl))
+			# add the full declaration to the list of arguments for the keyword validator
+			push!(_kw_args1, kw_field_decl(fdecl))
+			push!(_kw_args2, kw_field_decl_obj(fdecl))
+		end
+
+		# Prepend the current type's field declarations to list of all inherited field declarations  
+		prepend!(struct_field_decls, _struct_field_decls)
+		prepend!(kw_args1, _kw_args1)
+		prepend!(kw_args2, _kw_args2)
+
+		# Prepend the validator call to the list of validator calls in the constructor
+		pushfirst!(constr_args, :( InheritableFields.validate($ancestor_unbound_sig, $(keys(field_decls)...) )... ) )
+
+		# When we handle non-@abstract ancestors, this should go outside the if-else-end
+		next_sig = map_symbols(next_sig, formal_params, ancestor_params)
+		(ancestor_name, ancestor_params, _) = parse_typesig(next_sig)
+		if isempty(ancestor_params)
+				ancestor_unbound_sig = ancestor_name
+		else
+				ancestor_unbound_sig = :( $(ancestor_name){$(ancestor_params...)} )
+		end
     end
+
+	 @info "Creating constructors"
 
     # Define the keyword constructors
     kwconstrs = Expr[]
@@ -357,7 +392,7 @@ function define_concrete_type(type_decl, body; ismutable)
                 $(validators...)
                 $(kwconstrs...)
                 copy(obj::$type_name) = $type_name(obj)
-                InheritableFields.type_declaration(::Val{$(QuoteNode(type_name))}) = $newtype_decl
+                InheritableFields.type_declaration(::Type{$type_name}) = $newtype_decl
             end
     # println(expr)
     return expr
@@ -431,7 +466,7 @@ function process_typedef(type_decl::Expression, body::Expression)
     # create a default "validator" if none was provided
     if isempty(validators)
         field_names = keys(field_decls)
-        push!(validators, :( InheritableFields.validate(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
+        push!(validators, :( InheritableFields.validatet =(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
     end
 
     return (type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators)
