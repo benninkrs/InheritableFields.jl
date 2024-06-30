@@ -39,9 +39,40 @@ To achieve an effective hierarchy of concrete types, say `Person >: Employee :> 
 
 ## Advanced Usage
 
-### Keyword Construction and Default Values
+Construction of an object with fields defined in separate places can be tricky.
+To facilitate this, the macros `@mutable` and `@immutable` automatically define several constructors:
+* An inner constructor that resembles a default constructor, but allows each type in the hierarchy to validate its input arguments.
+* A keyword-based outer constructor that allows field values to be specified by name in any order, and uses default values provided in the type definition.
+* A keyword-based outer constructor that uses an existing object to provide default values.
+If the ojbect has type parameters, two versions of each constructor are created: one with explicit type parameters, and one in which the type parameters are inferred from the arguments.
 
-Besides the default constructor, a keyword-based constructor is defined for each `@mutable` or `@immutable` type.  This allows field values to be specified in any order using the field names as keywords:
+A `copy` method for the type is also created.
+
+### Argument Validation
+
+Within the body of an `@abstract`, `@mutable`, or `@immutable` type definition, one can implement a special method to validate construction values for the fields introduced by that type. For example, suppose type `A` requires `x` to be nonnegative.  This can be enforced as follows:
+```
+@abstract A{T<:Number} begin
+	 s::String = "goodbye"
+    x::T
+    function validate(s, x)
+        x >= zero(T) || error("x must be non-negative")
+        return (s, x)
+    end
+end
+```
+Assume types `B` and `C` are defined as above. Attempting to construct an instance of `C` with a negative value for `x` will produce an error:
+```
+c = C(; i = -6; b = true; x = -1.2)
+ERROR: x must be non-negative
+```
+A `validate` method defined in an `@abstract`, `@mutable`, or `@immutable` definition is called whenever an instance based on that type is constructed. It is passed candidate values for the type's fields as if it were the default inner constructor. The method should either return a tuple of field values or throw an exception.
+
+If no validation method is provided, a fallback method that simply returns the input arguments is used.
+
+### Default Values
+
+In addition to the standard constructor, a keyword-based constructor is defined for each `@mutable` or `@immutable` type.  This allows field values to be specified in any order using the field names as keywords:
 ```
 c = C(; i = -6, x = 1.2, b = true, s = "hello")  # == C{Float64}("goodbye", 1.2, -6, true)
 ```
@@ -58,32 +89,18 @@ The default value of a field is used when the keyword constructor is invoked wit
 c = C(; i = -6; b = true; x = 1.2)  # == C{Float64}("goodbye", 1.2, -6, true)
 ```
 
-### Validation of Construction Values
-
-Within the body of an `@abstract`, `@mutable`, or `@immutable` type definition, one can implement a special method to validate construction values for the fields introduced by that type. For example, suppose type `A` requires `x` to be nonnegative.  This can be enforced as follows:
+A keyword constructor can also be used with an existing instance:
 ```
-@abstract A{T<:Number} begin
-	 s::String = "goodbye"
-    x::T
-    function validate(s, x)
-        x >= zero(T) || error("x must be non-negative")
-        return (s, x)
-    end
-end
-
-# ... definitions of B and C above ...
-
-c = C(; i = -6; b = true; x = -1.2)
-ERROR: x must be non-negative
+new_c = C(c; s = "goodbye")
 ```
-The constructors that are automatically created for a `@mutable` or `@mmutable` type pass the input arguments associated with each type in the hierarchy to the provided validation function.
-
-A validation method should be defined within the type body, be named `validate`, and have the same parameterization and signature that a default constructor would.  It should either return valid arguments for a default constructor or throw an exception.  
+In this case, values for unspecified fields are copied from the provided instance, instead of using whatever default values may have been provided in the type definition.
 
 
 ## Hygiene
 
-Type parameters propagate from subtypes to supertypes as one would expect, regardless of their formal names. Similarly, type definitions will be evaluated correctly even if defined in different modules.
+When a `@mutable` or `@immutable` type is defined, formal and literal type parameters are propagated up the chain of type definitions so that inherited fields are expressed in terms of the correct type parameters.
+
+Similarly, all symbols appearing in a type definition are implicitly qualified by the module in which the definition was made, so that they will be resolved correctly even when subtypes are defined in different modules.
 
 <!--
 For example, if `C` were defined as
@@ -96,32 +113,40 @@ end
 then in `C("hi", Complex(0.1, -2.3), 5, true)`, the field `x::T` from `A{T}` would be `x::Complex{Float64}` because the `S` in `C{U,S}` is inferred to be Complex{Float64}, which is then mapped to `B{S}`, which is mapped to `A{S}`, which is mapped to `x::S`.
 
 Similarly, type definitions will be evaluated correctly even if defined in different modules.  This is because all non-parameter symbols appearing in field declarations are implicitly qualified by the module in which they are originally defined.
-
-## Limitations
-
-`validate` methods should only be defined within the bodies of `@abstract`, `@mutable`, or `@immutable` type definitions.
 -->
 
 
+## Limitations
 
-## Implementation
+`Vararg` type paramaeters may not work correctly.
 
-The  `@abstract` macro does the following
- 1. Define the specified type as `abstract type`.
- 2. Store the definition of the type's signature and fields (if any).
- 3. Define the `validate` method for the type (if provided).
+<!-->
+`validate` methods should only be defined within the bodies of `@abstract`, `@mutable`, or `@immutable` type definitions.
+-->
 
- The `@mutable` and `@immutable` macros are similar, except the first step is:
-  1. Define the specified type as `mutable struct` or `struct`, along with (i) an argument-validtating default constructor, and (ii) an argument-validating keyword constructor. 
+## Implementation Details
 
-The type definitions are not stored in a lookup table, but as methods for a function called `type_declaration`.  Given a type, this function returns the macro-defined type definition.
+The  `@abstract` macro:
+1. Defines the specified type as `abstract type`.
+2. Defines the `validate` method for the type (if provided).
+3. Stores the definition of the type's fields for later retrieval.
 
+ The `@mutable` or `@immutable` macro:
+1. Defines the specified type as `struct` or `mutable struct`.
+    - Looks up the inherited fields of all `@abstract` supertypes and includes them.
+    - Creates an inner constructor that calls the `validate` method for each (super)type the corresponding arguments.
+2. Defines the `validate` method for the type (if provided).
+3. Defines keyword-based outer constructors.
+4. Defines a copy method for the type.
+
+`validate` methods are actually defined slightly differently than how the appear in the type definition: They have an additional argument at the front, namely, the type for which the method is defined.  This allows `validate` to dispatch to the appropriate method.
+
+<!-- For example, 
 ```
 @abstract A{T<:Number} begin
 	 s::String = "goodbye"
     x::T
     function validate(s, x)
-	 	println("s = $s, x = $x")
         x >= zero(T) || error("x must be non-negative")
         return (s, x)
     end
@@ -133,7 +158,8 @@ abstract type A{T<:Number} end
 
 InheritableFields.type_declaration(::A{T}) where {T} = (... the type definition expressions ...)
 
-function InheritableFields.validate(::A{T}) where {T}
-	(... body of the provided function ...)
+function InheritableFields.validate(::A{T}, s, x) where {T}
+   x >= zero(T) || error("x must be non-negative")
+   return (s, x)
 end
-```
+``` -->
