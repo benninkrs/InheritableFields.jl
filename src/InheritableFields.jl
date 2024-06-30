@@ -211,10 +211,10 @@ function define_concrete_type(caller, type_decl, body; ismutable)
 	next_sig = super_sig
 	formal_params::Vector{Symbol} = type_params
 	context = caller
-	println("calling module is $caller")
+	# println("calling module is $caller")
 
 	while ancestor_name != :Any
-      @info "  Retrieving fields of $ancestor_name{$(ancestor_params...)}"
+      # @info "  Retrieving fields of $ancestor_name{$(ancestor_params...)}"
 
 		_struct_field_decls = Expression[]
 		_kw_args = Expression[]
@@ -253,7 +253,7 @@ function define_concrete_type(caller, type_decl, body; ismutable)
 		end
 
 		# Parse the field declarations
-		println("Processing type $ancestor_name with parameters {$(ancestor_params...)}, formal parameters {$(formal_params...)}")
+		# println("Processing type $ancestor_name with parameters {$(ancestor_params...)}, formal parameters {$(formal_params...)}")
 		for fdecl in values(field_decls)
 			# translate the field declaration to the ancestor's parameters
 
@@ -347,7 +347,6 @@ end
 # The "body" are all the lines after the type declaration.
 #(type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators)
 function process_typedef(type_decl::Expression, body::Expression)
-	@info "process_typedef():"
 
 	# Parse the declaration
 	(type_sig, super_sig) = parse_typedecl(type_decl)
@@ -405,12 +404,12 @@ function process_typedef(type_decl::Expression, body::Expression)
 		push!(validators, :( InheritableFields.validatet =(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
 	end
 
-	@info "type_sig = $type_sig"
-	@info "type_name = $type_name"
-	@info "type_params = $type_params"
-	@info "type_qualparams = $type_qualparams"
-	@info "unbound_sig = $unbound_sig"
-	@info "super_sig = $super_sig"
+	# @info "type_sig = $type_sig"
+	# @info "type_name = $type_name"
+	# @info "type_params = $type_params"
+	# @info "type_qualparams = $type_qualparams"
+	# @info "unbound_sig = $unbound_sig"
+	# @info "super_sig = $super_sig"
 	return (type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators)
 end
 
