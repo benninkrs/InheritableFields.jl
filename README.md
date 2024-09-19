@@ -84,6 +84,7 @@ begin
     x::T
 end
 ```
+If a default value is provided the field type may omitted; in this case the field's type is declared as that of the provided value.
 The default value of a field is used when the keyword constructor is invoked without specifying a value for that field:
 ```
 c = C(; i = -6; b = true; x = 1.2)  # == C{Float64}("goodbye", 1.2, -6, true)
