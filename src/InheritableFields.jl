@@ -391,7 +391,9 @@ function process_typedef(type_decl::Expression, body::Expression)
 				decl.args[1] = Expr(:where, decl.args[1], type_params...)
 			push!(validators, decl)
 		elseif @capture(decl, ((field_name_::field_type_  | field_name_) = def_val_) | (field_name_::field_type_ | field_name_))
-			(field_type === nothing) && (field_type = :Any)
+			if field_type === nothing
+				(def_val === nothing) ? (field_type = :Any) : (field_type = typeof(def_val))
+			end
 			field_decls[field_name] = FieldDecl((field_name, field_type, def_val))
 		else
 			error("In definition of type $type_name, could not parse declaration $decl")
@@ -399,10 +401,11 @@ function process_typedef(type_decl::Expression, body::Expression)
 	end
 
 	# create a default "validator" if none was provided
-	if isempty(validators)
-		field_names = keys(field_decls)
-		push!(validators, :( InheritableFields.validatet =(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
-	end
+	# if isempty(validators)
+	# 	field_names = keys(field_decls)
+	# 	# Why is this validatet instead of validate?  What is the prupose of this?  Seems to be wrong
+	# 	push!(validators, :( InheritableFields.validatet =(::Type{$unbound_sig}, $(field_names...)) where {$(type_qualparams...)} = ($(field_names...),) ) )
+	# end
 
 	# @info "type_sig = $type_sig"
 	# @info "type_name = $type_name"

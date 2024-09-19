@@ -12,25 +12,25 @@ This package does not aim to broadly recreate an object-oriented programming sty
 Use the macro `@abstract` to define an abstract type with associated fields:
 ```
 @abstract A{T<:Number} begin
-	s::String
-	x::T 
+    s::String
+    x::T 
 end
 ```
-Abstract types can be subtyped:
+If the type has no fields, the `begin end` block may be omitted from the definition. Abstract types can be subtyped:
 ```
 @abstract B{T} <: A{T} begin
-	i::Int
+    i::Int
 end
 ```
-Use `@mutable` or `@immutable` to create mutable or immutable `struct` type that inherits fields of all its `@abstract` supertypes and can introduce additional fields:
+Use `@mutable` or `@immutable` to create mutable or immutable concrete type (struct) that inherits the fields of all its `@abstract` supertypes and can introduce additional fields:
 ```
 @immutable C{T} <: B{T} begin
-	b::Bool
+    b::Bool
 end
 ```
-In this example, instances of type `C{T}` will have fields `s::String`, `x::T`, `i::Int`, and `b::bool`, in that order.
+In this example, instances of type `C{T}` will have fields `s::String`, `x::T`, `i::Int`, and `b::bool`, in that order. An instance of a `@mutable` or `@immutable` type can be constructed in the usual way, by calling the type with a value for each field in order.  However, construction using keywords (described below) is more flexible and powerful. 
 
-To achieve an effective hierarchy of concrete types, say `Person >: Employee :> Salaried`, first create a hierarchy of `@abstract` types, e.g. `AbstractPerson :> AbstractEmployee >: AbstractSalaried`.  Then, define methods that dispatch on these abstract types.  Finally, define a concrete type for each abstract type in the hierarachy (e.g. `@mutable Person <: AbstractPerson begin end`).
+Note that only abstract types can be inherited, in accordance with Julia's fundamental design.  To achieve what ammounts to a hierarchy of _concrete types_, say `Person >: Employee :> Salaried`, one can use the following approach:  First. create a hierarchy of `@abstract` types, e.g. `AbstractPerson :> AbstractEmployee >: AbstractSalaried`.  Second, define methods that dispatch on these abstract types.  Finally, define a concrete type for each abstract type in the hierarachy (e.g. `@mutable Person <: AbstractPerson`, `@mutable Employee <: AbstractEmployee`, etc.).
 
 <!-- c = C("hello", 1.2, -6, true)
 ```
@@ -42,9 +42,9 @@ To achieve an effective hierarchy of concrete types, say `Person >: Employee :> 
 Construction of an object with fields defined in separate places can be tricky.
 To facilitate this, the macros `@mutable` and `@immutable` automatically define several constructors:
 * An inner constructor that resembles a default constructor, but allows each type in the hierarchy to validate its input arguments.
-* A keyword-based outer constructor that allows field values to be specified by name in any order, and uses default values provided in the type definition.
+* A keyword-based outer constructor in which values may be assigned to named fields in any order, and omitted fields take default values provided in the type definitions.
 * A keyword-based outer constructor that uses an existing object to provide default values.
-If the ojbect has type parameters, two versions of each constructor are created: one with explicit type parameters, and one in which the type parameters are inferred from the arguments.
+If the object has type parameters, two versions of each constructor are created: one with explicit type parameters, and one in which the type parameters are inferred from the arguments.
 
 A `copy` method for the type is also created.
 
@@ -53,7 +53,7 @@ A `copy` method for the type is also created.
 Within the body of an `@abstract`, `@mutable`, or `@immutable` type definition, one can implement a special method to validate construction values for the fields introduced by that type. For example, suppose type `A` requires `x` to be nonnegative.  This can be enforced as follows:
 ```
 @abstract A{T<:Number} begin
-	 s::String = "goodbye"
+    s::String = "goodbye"
     x::T
     function validate(s, x)
         x >= zero(T) || error("x must be non-negative")
@@ -61,9 +61,9 @@ Within the body of an `@abstract`, `@mutable`, or `@immutable` type definition, 
     end
 end
 ```
-Assume types `B` and `C` are defined as above. Attempting to construct an instance of `C` with a negative value for `x` will produce an error:
+Suppose types `B` and `C` are defined as above. Attempting to construct an instance of `C` (a subtype of `A`) with a negative value for `x` will produce an error:
 ```
-c = C(; i = -6; b = true; x = -1.2)
+c = C(; i = -6, b = true, x = -1.2, s = "hello")
 ERROR: x must be non-negative
 ```
 A `validate` method defined in an `@abstract`, `@mutable`, or `@immutable` definition is called whenever an instance based on that type is constructed. It is passed candidate values for the type's fields as if it were the default inner constructor. The method should either return a tuple of field values or throw an exception.
@@ -74,14 +74,14 @@ If no validation method is provided, a fallback method that simply returns the i
 
 In addition to the standard constructor, a keyword-based constructor is defined for each `@mutable` or `@immutable` type.  This allows field values to be specified in any order using the field names as keywords:
 ```
-c = C(; i = -6, x = 1.2, b = true, s = "hello")  # == C{Float64}("goodbye", 1.2, -6, true)
+c = C(; i = -6, x = 1.2, b = true)  # == C{Float64}("goodbye", 1.2, -6, true)
 ```
 Besides providing increased readibility and robustness to field order, the keyword constructor allows the use of default values. Any field declaration may optionally include a default value by expressing it as an assignment:
 ```
 @abstract A{T<:Number}
 begin
-	s::String = "goodbye"
-	x::T
+    s::String = "goodbye"
+    x::T
 end
 ```
 The default value of a field is used when the keyword constructor is invoked without specifying a value for that field:
@@ -118,9 +118,9 @@ Similarly, type definitions will be evaluated correctly even if defined in diffe
 
 ## Limitations
 
-`Vararg` type paramaeters may not work correctly.
+`Vararg` type parameters may not work correctly.
 
-<!-->
+<!--
 `validate` methods should only be defined within the bodies of `@abstract`, `@mutable`, or `@immutable` type definitions.
 -->
 
