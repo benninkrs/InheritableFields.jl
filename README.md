@@ -70,37 +70,42 @@ A `validate` method defined in an `@abstract`, `@mutable`, or `@immutable` defin
 
 If no validation method is provided, a fallback method that simply returns the input arguments is used.
 
-### Default Values
+### Keyword Constructors
 
 In addition to the standard constructor, a keyword-based constructor is defined for each `@mutable` or `@immutable` type.  This allows field values to be specified in any order using the field names as keywords:
 ```
-c = C(; i = -6, x = 1.2, b = true)  # == C{Float64}("goodbye", 1.2, -6, true)
+c = C(; i = -6, x = 1.2, b = true, s = "hello")  # == C{Float64}("hello", 1.2, -6, true)
 ```
-Besides providing increased readibility and robustness to field order, the keyword constructor allows the use of default values. Any field declaration may optionally include a default value by expressing it as an assignment:
+Besides providing increased readibility and robustness to field order, the keyword constructor allows the use of default values (explained next). 
+
+
+### Default Values
+
+Any field declaration may optionally include a default value by expressing it as an assignment:
 ```
 @abstract A{T<:Number} begin
     s::String = "goodbye"
     x::T
 end
 ```
-If a default value is provided the field type may omitted; in this case the field's type is declared as that of the provided value.
-The default value of a field is used when the keyword constructor is invoked without specifying a value for that field:
+If a default value is provided, the field's type may be omitted (but see the Limitations below); in this case the field's type is taken to be that of the provided value.
+The default value of a field is used when the keyword constructor is invoked and no value is provided for that field:
 ```
 c = C(; i = -6; b = true; x = 1.2)  # == C{Float64}("goodbye", 1.2, -6, true)
 ```
-
-A keyword constructor can also be used with an existing instance:
+Default values can also be obtained from an existing instance:
 ```
 new_c = C(c; s = "goodbye")
 ```
-In this case, values for unspecified fields are copied from the provided instance, instead of using whatever default values may have been provided in the type definition.
+In this case, values for the unspecified fields are copied from the provided instance.
+
 
 
 ## Hygiene
 
 When a `@mutable` or `@immutable` type is defined, formal and literal type parameters are propagated up the chain of type definitions so that inherited fields are expressed in terms of the correct type parameters.
 
-Similarly, all symbols appearing in a type definition are implicitly qualified by the module in which the definition was made, so that they will be resolved correctly even when subtypes are defined in different modules.
+Similarly, all symbols appearing in a type definition are implicitly qualified by the module in which the definition occurs, so that they will be resolved correctly even when subtypes are defined in different modules.
 
 <!--
 For example, if `C` were defined as
@@ -118,7 +123,9 @@ Similarly, type definitions will be evaluated correctly even if defined in diffe
 
 ## Limitations
 
-`Vararg` type parameters may not work correctly.
+Within a type definition, if the default value given for a field depends on a type parameter, for example `x = zero(T)`, the field's type cannot be automatically inferred.  In this case the type must be explicitly provided, e.g. `x::T = zero(T)`. 
+
+`Vararg` type parameters have not been tested may not work correctly.
 
 <!--
 `validate` methods should only be defined within the bodies of `@abstract`, `@mutable`, or `@immutable` type definitions.

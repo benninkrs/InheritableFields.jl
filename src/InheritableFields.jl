@@ -34,8 +34,7 @@ When a @mutable or @immutable is declared:
 - The details of the type declaration are stored in a global way.
 	These details include the current module, the signature, and the field declarations.
 
-	This is done by defining a method of the type_declaration function that returns those details. The reason we do it this way instead of using a Dict, is that the type name is 
-	(Why is this done instead of using a Dict?)
+	This is done by defining a method of the type_declaration function that returns those details. The reason we do it this way instead of using a Dict, is ... ? 
 
 =#
 
@@ -63,7 +62,7 @@ import TypeTools.map_symbols
 using OrderedCollections
 
 
-# The declaration of each  type are stored in a global registry.
+# The declaration of each type are stored in a global registry.
 # The declaration consists of:
 #	- The module in which the type is defined
 #	- The type's name and formal parameters
@@ -322,7 +321,7 @@ function define_concrete_type(caller, type_decl, body; ismutable)
 					copy(obj::$type_name) = $type_name(obj)
 					InheritableFields.type_declaration(::Type{$type_name}) = $newtype_decl
 			end
-	return expr
+	return rmlines(expr)
 end
 
 
@@ -391,15 +390,7 @@ function process_typedef(type_decl::Expression, body::Expression)
 			push!(validators, decl)
 		elseif @capture(decl, ((field_name_::field_type_  | field_name_) = def_val_) | (field_name_::field_type_ | field_name_))
 			if isnothing(field_type)
-				if isnothing(def_val)
-					field_type = :Any
-				else
-					if def_val isa QuoteNode
-						field_type = typeof(def_val.value)
-					else
-						field_type = typeof(def_val)
-					end
-				end
+				isnothing(def_val) ? field_type = :Any : field_type = :( typeof($def_val) )
 			end
 			field_decls[field_name] = FieldDecl((field_name, field_type, def_val))
 		else
