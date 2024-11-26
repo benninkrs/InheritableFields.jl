@@ -53,7 +53,7 @@ A `copy` method for the type is also created.
 Within the body of an `@abstract`, `@mutable`, or `@immutable` type definition, one can implement a special method to validate construction values for the fields introduced by that type. For example, suppose type `A` requires `x` to be nonnegative.  This can be enforced as follows:
 ```
 @abstract A{T<:Number} begin
-    s::String = "goodbye"
+    s::String
     x::T
     function validate(s, x)
         x >= zero(T) || error("x must be non-negative")
@@ -78,8 +78,7 @@ c = C(; i = -6, x = 1.2, b = true)  # == C{Float64}("goodbye", 1.2, -6, true)
 ```
 Besides providing increased readibility and robustness to field order, the keyword constructor allows the use of default values. Any field declaration may optionally include a default value by expressing it as an assignment:
 ```
-@abstract A{T<:Number}
-begin
+@abstract A{T<:Number} begin
     s::String = "goodbye"
     x::T
 end

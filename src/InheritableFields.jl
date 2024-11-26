@@ -187,7 +187,7 @@ end
 function define_concrete_type(caller, type_decl, body; ismutable)
 	(type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators) = process_typedef(type_decl, body)
 	if isempty(type_params)
-		new_sig = type_sig
+		new_sig = :( new )
 	else
 		new_sig = :( new{$(type_params...)} )
 	end
@@ -347,7 +347,6 @@ end
 # The "body" are all the lines after the type declaration.
 #(type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators)
 function process_typedef(type_decl::Expression, body::Expression)
-
 	# Parse the declaration
 	(type_sig, super_sig) = parse_typedecl(type_decl)
 	(type_name, type_params, type_qualparams) = parse_typesig(type_sig)
@@ -391,8 +390,16 @@ function process_typedef(type_decl::Expression, body::Expression)
 				decl.args[1] = Expr(:where, decl.args[1], type_params...)
 			push!(validators, decl)
 		elseif @capture(decl, ((field_name_::field_type_  | field_name_) = def_val_) | (field_name_::field_type_ | field_name_))
-			if field_type === nothing
-				(def_val === nothing) ? (field_type = :Any) : (field_type = typeof(def_val))
+			if isnothing(field_type)
+				if isnothing(def_val)
+					field_type = :Any
+				else
+					if def_val isa QuoteNode
+						field_type = typeof(def_val.value)
+					else
+						field_type = typeof(def_val)
+					end
+				end
 			end
 			field_decls[field_name] = FieldDecl((field_name, field_type, def_val))
 		else
