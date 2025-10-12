@@ -4,8 +4,8 @@
 Define abstract types with fields to be inherited by concrete subtypes.
 """
 module InheritableFields
-export @abstract, @immutable, @mutable
-#export FieldDecl, map_symbols, type_decls, type_field_decls
+export @abstract, @immutable, @mutable, @addtotype
+#export FieldDef, map_symbols, type_decls, type_field_decls
 
 
 #=
@@ -34,7 +34,7 @@ When a @mutable or @immutable is declared:
 - The details of the type declaration are stored in a global way.
 	These details include the current module, the signature, and the field declarations.
 
-	This is done by defining a method of the type_declaration function that returns those details. The reason we do it this way instead of using a Dict, is ... ? 
+	This is done by defining a method of the get_typedef function that returns those details. The reason we do it this way instead of using a Dict, is ... ? 
 
 =#
 
@@ -75,13 +75,13 @@ using OrderedCollections
 
 # Type aliases for data structures that store field declarations and type declarations
 const Expression = Any
-const FieldDecl = NamedTuple{(:name, :type, :default), Tuple{Symbol, Expression, Any}}
-const TypeDecl = Tuple{Module, Expression, Expression, OrderedDict{Symbol, FieldDecl}}
+const FieldDef = @NamedTuple{name::Symbol, type::Expression, default::Any}
+const TypeDef = NamedTuple{(:module, :signature, :supersig, :fields), Tuple{Module, Expression, Expression, OrderedDict{Symbol, FieldDef}}}		#module, unbound signature, super signature, field declarations
 
 # Global storage of type declarations
-# const type_decls = Dict{Type, TypeDecl}}()
+# const type_decls = Dict{Type, TypeDef}}()
 # Instead, we'll use a function 
-type_declaration(::Type) = nothing
+get_typedef(::Type) = nothing
 
 # Function to validate arguments for constructors of types declared using this package.
 # Fallback is to simply return the arguments.
@@ -115,14 +115,14 @@ end
 See also: [`@mutable`](@ref), [`@immutable`](@ref)
 """
 macro abstract(type_decl, body = :(begin end) )
-    (type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators) = process_typedef(type_decl, body)
+    (type_sig, type_name, params, params_qual, unbound_sig, super_sig, field_decls, validators) = process_typedef(type_decl, body)
 
-    newtype_decl = TypeDecl((__module__, unbound_sig, super_sig, field_decls))
+    typedef = TypeDef((__module__, unbound_sig, super_sig, field_decls))
 
     expr = quote
 					Base.@__doc__ abstract type $type_sig <: $super_sig end
 					$(validators...)
-					InheritableFields.type_declaration(::Type{$type_name}) = $newtype_decl
+					InheritableFields.get_typedef(::Type{$type_name}) = $typedef
 			end
     return esc(expr)
 end
@@ -182,6 +182,52 @@ macro mutable(type_decl, body = :(begin end) )
 end
 
 
+
+"""
+	@addtotype ‹type› begin [fields] [validators] end
+
+Adds fields and/or validators to an already-defined abstract type.
+`‹type›` is the signature of a type previously defined with `@abstract`;
+any type parameters that appear here correspond to those of the original 
+definition, and must be type variables without constraints. It is not
+possible to introduce new additional type parameters or change the bounds
+on existing type parameters.
+
+`@addtotype` will not affect concrete subtypes that have already been defined.
+"""
+macro addtotype(type_expr, body)
+	(type_sig, type_name, params, params_qual, unbound_sig, super_sig, field_defs, validators) = process_typedef(type_expr, body)
+
+	the_type = Base.eval(__module__, type_name)
+	typedef = get_typedef(the_type)
+	orig_params = parse_typesig(typedef.signature)[2]
+
+	if length(params) > length(orig_params)
+		error("$(unbound_sig) has more parameters than the original definition $(typedef.signature).")
+	end
+
+	# Add the new fields
+	for (field, def) in pairs(field_defs)
+		# Make sure field is not already defined
+		haskey(typedef.fields, field) && error("Field $field is already defined for type $the_type." )
+
+		# Map the type parameters from the current declaration to those of the original declaration
+		def = map_symbols(def, params, orig_params[1:length(params)])
+
+		# Add the field to the original list
+		typedef.fields[field] = def;
+	end
+
+	# Add the new validators
+	# (Do we need to map symbols?)
+	expr = quote $(validators...) end
+	return esc(expr)
+
+end
+	
+
+
+
 # Function version. More convenient for calling from other macros
 function define_concrete_type(caller, type_decl, body; ismutable)
 	(type_sig, type_name, type_params, type_qualparams, unbound_sig, super_sig, field_decls, validators) = process_typedef(type_decl, body)
@@ -191,7 +237,7 @@ function define_concrete_type(caller, type_decl, body; ismutable)
 		new_sig = :( new{$(type_params...)} )
 	end
 
-	newtype_decl =  TypeDecl((caller, unbound_sig, super_sig, field_decls))
+	newtype_decl =  TypeDef((caller, unbound_sig, super_sig, field_decls))
 
 	# Assemble the field declarations for this type and all ancestor types.
 	# The search will proceed up the type hierarchy, but we will eventually reverse the
@@ -226,7 +272,7 @@ function define_concrete_type(caller, type_decl, body; ismutable)
 			ancestor_type = Base.eval(context, ancestor_name)
 			# ancestor_type = context.eval(ancestor_name)
 
-			type_decl = type_declaration(ancestor_type)
+			type_decl = get_typedef(ancestor_type)
 			if isnothing(type_decl)
 				@warn "In defining $type_name, $ancestor_name is not an `@abstract` type. No more ancestors will be inherited."
 				break
@@ -262,7 +308,7 @@ function define_concrete_type(caller, type_decl, body; ismutable)
 			# Qualify all symbols (excluging type vars) by the Module where they were used
 			new_type = qualify_symbols(fdecl.type, type_params, context)
 			new_default = qualify_symbols(fdecl.default, type_params, context)
-			fdecl = FieldDecl((fdecl.name, new_type, new_default))
+			fdecl = FieldDef((fdecl.name, new_type, new_default))
 
 			# add the declaration w/o the default value to the struct's declared fields
 			push!(_struct_field_decls, plain_field_decl(fdecl))
@@ -319,7 +365,7 @@ function define_concrete_type(caller, type_decl, body; ismutable)
 					$(validators...)
 					$(kwconstrs...)
 					copy(obj::$type_name) = $type_name(obj)
-					InheritableFields.type_declaration(::Type{$type_name}) = $newtype_decl
+					InheritableFields.get_typedef(::Type{$type_name}) = $newtype_decl
 			end
 	return rmlines(expr)
 end
@@ -359,7 +405,7 @@ function process_typedef(type_decl::Expression, body::Expression)
 	end
 
 	# Parse the body
-	field_decls = OrderedDict{Symbol, FieldDecl}()
+	field_decls = OrderedDict{Symbol, FieldDef}()
 	validators = Expression[]
 
 	# Evidently @capture ignores LineNumberNodes, which is why it is useful
@@ -392,7 +438,7 @@ function process_typedef(type_decl::Expression, body::Expression)
 			if isnothing(field_type)
 				isnothing(def_val) ? field_type = :Any : field_type = :( typeof($def_val) )
 			end
-			field_decls[field_name] = FieldDecl((field_name, field_type, def_val))
+			field_decls[field_name] = FieldDef((field_name, field_type, def_val))
 		else
 			error("In definition of type $type_name, could not parse declaration $decl")
 		end
@@ -415,11 +461,11 @@ function process_typedef(type_decl::Expression, body::Expression)
 end
 
 
-map_symbols(fd::FieldDecl, from_syms, to_syms) = FieldDecl(map(ex->map_symbols(ex, from_syms, to_syms), fd))
+map_symbols(fd::FieldDef, from_syms, to_syms) = FieldDef(map(ex->map_symbols(ex, from_syms, to_syms), fd))
 
 
 # Return the expression for a keyword-type of field declaration
-function kw_field_decl(fdecl::FieldDecl)
+function kw_field_decl(fdecl::FieldDef)
     ex = Expr(:(::), fdecl.name, fdecl.type)
     if fdecl.default != nothing
         ex = Expr(:kw, ex, fdecl.default)
@@ -427,14 +473,14 @@ function kw_field_decl(fdecl::FieldDecl)
     return ex
 end
 
-function kw_field_decl_obj(fdecl::FieldDecl)
+function kw_field_decl_obj(fdecl::FieldDef)
     ex = Expr(:(::), fdecl.name, fdecl.type)
     ex = Expr(:kw, ex, :( obj.$(fdecl.name) ))
     return ex
 end
 
 # Return the expression for a field declaration, omitting the default value
-plain_field_decl(fdecl::FieldDecl) = Expr(:(::), fdecl.name, fdecl.type)
+plain_field_decl(fdecl::FieldDef) = Expr(:(::), fdecl.name, fdecl.type)
 
 
 # Qualify symbols in an expression with namespace

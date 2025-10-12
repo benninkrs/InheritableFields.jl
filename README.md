@@ -100,6 +100,21 @@ new_c = C(c; s = "goodbye")
 In this case, values for the unspecified fields are copied from the provided instance.
 
 
+### Appending Additional Fields or Validators
+
+Additional fields or validators can be added to an `@abstract` type after its initial definition.
+(This can be useful to avoid circular type definitions.) For example,
+```
+@abstract A{T<:Number} begin
+	s::String
+end
+
+@addtotype A{X} begin
+    x::X 
+end
+```
+is equivalent to the very first example above.  Note that when using `@addtotype`, it is not possible to introduce additional type parameters or change the bounds on existing type parameters (since the type has already been defined).  Also note that only concrete subtypes defined _after_ `@addtotype` will acquire the added fields.
+
 
 ## Hygiene
 
